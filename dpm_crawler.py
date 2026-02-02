@@ -4,6 +4,7 @@ import time
 import random
 import os
 from bs4 import BeautifulSoup
+import re
 
 # ================= 配置区 =================
 # 之前抓到的 User-Agent
@@ -52,10 +53,12 @@ def get_cultural_list(page_num, category="6", dynasty="1276"):
         print(f"💥 网络错误: {e}")
     return []
 
+
+
 def get_cultural_detail(uuid, page_num):
     """
     获取文物的详情信息（解析 HTML）
-    包括：基本信息（年代、文物号等） + 标签（图案、类型等）
+    将基本信息和标签信息分离开，并特殊处理颜色代码。
     """
     params = {
         "id": uuid,
@@ -69,35 +72,58 @@ def get_cultural_detail(uuid, page_num):
             return None
         
         soup = BeautifulSoup(resp.text, "html.parser")
-        info_dict = {}
+        
+        # 最终返回的字典，包含两个子字典
+        result = {
+            "base_info": {},
+            "tags": {}
+        }
+        base_info_dict = result["base_info"]
+        tags_dict = result["tags"]
 
-        # 1. 解析基本信息 (文物号, 分类, 年代)
-        # 你的分析：.ul_box -> ul -> li -> span(标题) + font(内容)
+        # 1. 解析基本信息 (文物号, 分类, 年代, 颜色)
         ul_box = soup.find("div", class_="ul_box")
         if ul_box:
             for li in ul_box.find_all("li"):
                 span = li.find("span")
-                font = li.find("font")
-                if span and font:
-                    key = span.get_text(strip=True)
-                    # 颜色那一栏很特殊，是一个色块，font里可能没字，这里简单处理一下
-                    value = font.get_text(strip=True)
-                    if key:
-                        info_dict[key] = value
+                if not span:
+                    continue
+                
+                key = span.get_text(strip=True)
+                
+                if key == "颜色":
+                    # --- 特殊处理颜色代码 ---
+                    color_codes = []
+                    # 查找包含颜色信息的 font 标签
+                    color_font = li.find("font", class_="detail_color")
+                    if color_font:
+                        # 遍历所有 biankuang 里的 font
+                        for inner_font in color_font.select("div.biankuang font"):
+                            style_attr = inner_font.get("style", "")
+                            # 使用正则表达式从 "color:#000000" 中提取颜色代码
+                            match = re.search(r"color:\s*(#[0-9a-fA-F]{6})", str(style_attr))
+                            if match:
+                                color_codes.append(match.group(1))
+                    base_info_dict[key] = color_codes
+                else:
+                    # --- 常规处理其他基本信息 ---
+                    font = li.find("font")
+                    if font:
+                        value = font.get_text(strip=True)
+                        if key and value: # 确保 key 和 value 都不为空
+                            base_info_dict[key] = value
 
         # 2. 解析标签 (图案与纹样, 过程与技术...)
-        # recommend_relevance_tags -> .kg-container -> .swiper-tag-title + a.caption
         tags_container = soup.find("div", id="recommend_relevance_tags")
         if tags_container:
             for kg in tags_container.find_all("div", class_="kg-container"):
                 title_div = kg.find("div", class_="swiper-tag-title")
                 if title_div:
                     tag_category = title_div.get_text(strip=True)
-                    # 获取该类别下所有的标签文本
                     tags = [a.get_text(strip=True) for a in kg.find_all("a", class_="caption")]
-                    info_dict[tag_category] = tags
+                    tags_dict[tag_category] = tags
         
-        return info_dict
+        return result
 
     except Exception as e:
         print(f"💥 解析详情出错 ({uuid}): {e}")

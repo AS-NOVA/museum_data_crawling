@@ -85,10 +85,12 @@ def main():
                 downloaded_image_paths.append(os.path.join("images", image_filename))
 
             # --- 元数据整理 ---
+            detail_data = item.get("detail_info", {})
             metadata = {
                 "uuid": uuid,
                 "name": item.get("name"),
-                "base_info": item.get("detail_info", {}), # 将所有标签和基础信息整合
+                "base_info": detail_data.get("base_info", {}), # 只取 base_info 部分
+                "tags": detail_data.get("tags", {}),           # 新增 tags 字段
                 "image_paths": downloaded_image_paths
             }
             
