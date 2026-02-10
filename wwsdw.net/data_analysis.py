@@ -1,46 +1,16 @@
 import os
-
-import matplotlib.pyplot as plt
-from matplotlib import font_manager as fm
 import pandas as pd
 import wordcloud
 
-# 1. 解决 Matplotlib 的中文显示问题（针对报告中的图表）
-# 通过显式加载字体文件，避免 Matplotlib 查找字体失败
-def _set_chinese_font():
-    font_dir = os.path.join(os.environ.get("WINDIR", "C:\\Windows"), "Fonts")
-    candidates = [
-        "msyh.ttc",
-        "msyh.ttf",
-        "simhei.ttf",
-        "simsun.ttc",
-        "arialuni.ttf",
-    ]
-    for font_file in candidates:
-        font_path = os.path.join(font_dir, font_file)
-        if os.path.exists(font_path):
-            fm.fontManager.addfont(font_path)
-            font_name = fm.FontProperties(fname=font_path).get_name()
-            plt.rcParams["font.family"] = font_name
-            plt.rcParams["font.sans-serif"] = [font_name]
-            return font_path, font_name
-    return None, None
+font_path = os.path.join(os.environ.get("WINDIR", "C:\\Windows"), "Fonts", "msyh.ttc")
+_original_wc_init = wordcloud.WordCloud.__init__
 
-def _force_wordcloud_font(font_path):
-    if not font_path:
-        return
-    original_init = wordcloud.WordCloud.__init__
+def _patched_wc_init(self, *args, **kwargs):
+    if not kwargs.get("font_path"):
+        kwargs["font_path"] = font_path
+    _original_wc_init(self, *args, **kwargs)
 
-    def _patched_init(self, *args, **kwargs):
-        if not kwargs.get("font_path"):
-            kwargs["font_path"] = font_path
-        original_init(self, *args, **kwargs)
-
-    wordcloud.WordCloud.__init__ = _patched_init
-
-font_path, font_name = _set_chinese_font()
-_force_wordcloud_font(font_path)
-plt.rcParams["axes.unicode_minus"] = False  # 解决负号显示异常问题
+wordcloud.WordCloud.__init__ = _patched_wc_init
 
 from ydata_profiling import ProfileReport
 from ydata_profiling.visualisation import plot as yp_plot
