@@ -5,7 +5,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # --- 全局配置 ---
-INPUT_CSV = 'list.csv'
+INPUT_CSV = 'shandong_neolithic_pottery.csv'
 OUTPUT_CSV = 'merged_list.csv'
 IMAGE_DIR = 'images'
 MAX_WORKERS = 16 # 开启16个线程并发，拒绝两小时的低效等待
