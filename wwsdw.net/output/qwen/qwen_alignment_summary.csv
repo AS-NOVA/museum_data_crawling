@@ -1,0 +1,7 @@
+field,total,match,accuracy
+era,98,90,0.9184
+culture,94,76,0.8085
+decoration,30,3,0.1000
+shape_feature,64,16,0.2500
+texture,98,23,0.2347
+root_shape,98,83,0.8469

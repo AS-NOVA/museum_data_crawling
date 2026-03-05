@@ -6,18 +6,14 @@ import numpy as np
 from pathlib import Path
 from tqdm import tqdm  # 如果没装 tqdm，这就去 pip install tqdm
 
-# ================= 强力配置区 =================
-# 1. 强制使用 CPU，拒绝环境焦虑
+# ================= 配置 =================
 DEVICE = "cpu" 
-
-# 2. 路径锚点化 (符合你的 Pathlib 偏好)
-# 假设脚本在 wwsdw.net/src/model/ 目录下
 CURRENT_DIR = Path(__file__).resolve().parent
-PROJECT_ROOT = CURRENT_DIR.parent.parent  # 回退两级到 wwsdw.net
+PROJECT_ROOT = CURRENT_DIR.parent.parent  # wwsdw.net
 DATA_CSV = PROJECT_ROOT / "data" / "extracted" / "extracted_metadata.csv"
 IMAGE_DIR = PROJECT_ROOT / "images"
 
-# ============================================
+# ========================================
 
 def main():
     print(f"[Init] Project Root: {PROJECT_ROOT}")
@@ -40,16 +36,17 @@ def main():
     print(f"[Data] Loaded metadata with {len(df)} rows.")
 
     # 构建图片索引列表
-    # 逻辑：每一行对应 image_count 张图，我们需要把它们展平
+    # 逻辑：每一行对应 image_count 张图，需要把它们展平
     image_entries = [] # 存 (image_path, parent_name, parent_era, parent_shape)
     
     print("[Data] Indexing images...")
     for _, row in df.iterrows():
         base_id = str(row['id'])
-        count = int(row['image_count'])
+        # count = int(row['image_count'])
+        count = 1 # 先假设每行只有一张图，后续再扩展
         name = row['name']
         
-        # 你的逻辑：id + "_" + 0...n + ".jpg"
+        # id + "_" + 0...n + ".jpg"
         for i in range(count):
             img_filename = f"{base_id}_{i}.jpg"
             img_path = IMAGE_DIR / img_filename
@@ -83,7 +80,7 @@ def main():
                 try:
                     img = Image.open(entry['path'])
                     processed_img = preprocess(img).unsqueeze(0)
-                    batch_images.append(processed_images)
+                    batch_images.append(processed_img)
                     valid_batch_indices.append(idx) # 记录这一批次里成功的
                 except Exception as e:
                     # 简单跳过坏图
