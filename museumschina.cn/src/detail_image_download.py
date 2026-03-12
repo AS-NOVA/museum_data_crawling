@@ -12,10 +12,11 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
 LOG_DIR = BASE_DIR / "log"
 IMAGE_DIR = DATA_DIR / "images"
-INPUT_CSV = DATA_DIR / "pottery_details_20260305_210613.csv"
+# INPUT_CSV = DATA_DIR / "pottery_details_20260305_210613.csv"
+INPUT_CSV = DATA_DIR / "data_cleaned_20260311_175712.csv"
 
 TIMESTAMP = datetime.now().strftime("%Y%m%d_%H%M%S")
-OUTPUT_CSV = DATA_DIR / f"pottery_details_local_image_{TIMESTAMP}.csv"
+OUTPUT_CSV = DATA_DIR / f"data_local_image_{TIMESTAMP}.csv"
 LOG_FILE = LOG_DIR / f"download_log_{TIMESTAMP}.log"
 
 # ================= 2. 日志配置 =================
@@ -36,23 +37,30 @@ def get_unique_filename(url):
     hash_obj = hashlib.md5(url.encode('utf-8'))
     return f"{hash_obj.hexdigest()}{ext}"
 
-def download_image(url, target_path):
-    """执行实际的下载操作"""
+def download_image(url, target_path, max_retries=3):
+    """执行实际的下载操作，包含重试机制"""
     if target_path.exists():
         # 如果文件已存在，直接视为成功（MD5保证了内容一致性）
         return True
     
-    try:
-        headers = {"User-Agent": "Mozilla/5.0"}
-        r = requests.get(url, headers=headers, timeout=20)
-        r.raise_for_status()
-        with open(target_path, 'wb') as f:
-            f.write(r.content)
-        logging.info(f"DOWNLOAD SUCCESS: {url} -> {target_path.name}")
-        return True
-    except Exception as e:
-        logging.error(f"DOWNLOAD FAILED: {url} | Reason: {str(e)}")
-        return False
+    headers = {"User-Agent": "Mozilla/5.0"}
+    
+    for attempt in range(max_retries):
+        try:
+            r = requests.get(url, headers=headers, timeout=20)
+            r.raise_for_status()
+            with open(target_path, 'wb') as f:
+                f.write(r.content)
+            logging.info(f"DOWNLOAD SUCCESS: {url} -> {target_path.name}")
+            return True
+        except Exception as e:
+            if attempt < max_retries - 1:
+                logging.warning(f"RETRYING ({attempt+1}/{max_retries}): {url} | Reason: {str(e)}")
+                time.sleep(1)
+            else:
+                logging.error(f"DOWNLOAD FAILED after {max_retries} attempts: {url} | Reason: {str(e)}")
+                return False
+    return False
 
 def main():
     if not INPUT_CSV.exists():
@@ -88,7 +96,7 @@ def main():
                 g_local_path = IMAGE_DIR / g_filename
                 if download_image(g_url, g_local_path):
                     local_paths.append(f"images/{g_filename}")
-                time.sleep(0.1) # 短暂休眠避免请求过快
+                time.sleep(0.05) # 短暂休眠避免请求过快
             df.at[index, 'local_gallery_images'] = "|".join(local_paths)
 
     # 保存新的 CSV

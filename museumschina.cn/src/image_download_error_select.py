@@ -4,7 +4,8 @@ from pathlib import Path
 # ================= 1. 路径配置 =================
 BASE_DIR = Path(__file__).resolve().parent.parent
 DATA_DIR = BASE_DIR / "data"
-INPUT_CSV = DATA_DIR / "pottery_details_local_image_20260310_155657.csv"
+# INPUT_CSV = DATA_DIR / "pottery_details_local_image_20260310_155657.csv"
+INPUT_CSV = DATA_DIR / "data_local_image_20260311_181727.csv"
 
 def check_download_status():
     if not INPUT_CSV.exists():
