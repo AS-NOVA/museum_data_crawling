@@ -2,3 +2,4 @@ images/
 log/
 model/
 old_images/
+.env

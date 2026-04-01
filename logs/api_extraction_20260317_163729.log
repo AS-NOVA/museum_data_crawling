@@ -1,0 +1,21 @@
+2026-03-17 16:39:29,876 - INFO - 成功加载 .env 配置文件
+2026-03-17 16:39:37,125 - INFO - HTTP Request: POST https://api.deepseek.com/chat/completions "HTTP/1.1 200 OK"
+2026-03-17 16:39:39,086 - INFO - SUCCESS - Name: 岳石文化尊形陶器
+2026-03-17 16:39:39,146 - INFO - HTTP Request: POST https://api.deepseek.com/chat/completions "HTTP/1.1 200 OK"
+2026-03-17 16:39:40,997 - INFO - SUCCESS - Name: 新石器时代晚期陶豆
+2026-03-17 16:39:41,048 - INFO - HTTP Request: POST https://api.deepseek.com/chat/completions "HTTP/1.1 200 OK"
+2026-03-17 16:39:43,142 - INFO - SUCCESS - Name: 新石器时代陶网坠
+2026-03-17 16:39:43,204 - INFO - HTTP Request: POST https://api.deepseek.com/chat/completions "HTTP/1.1 200 OK"
+2026-03-17 16:39:45,724 - INFO - SUCCESS - Name: 新石器时代绳纹单耳红陶盉
+2026-03-17 16:39:45,789 - INFO - HTTP Request: POST https://api.deepseek.com/chat/completions "HTTP/1.1 200 OK"
+2026-03-17 16:39:48,413 - INFO - SUCCESS - Name: 新石器时代细绳纹鱼篓形陶罐
+2026-03-17 16:39:48,469 - INFO - HTTP Request: POST https://api.deepseek.com/chat/completions "HTTP/1.1 200 OK"
+2026-03-17 16:39:50,513 - INFO - SUCCESS - Name: 新石器时代大溪文化黑陶壶
+2026-03-17 16:39:50,556 - INFO - HTTP Request: POST https://api.deepseek.com/chat/completions "HTTP/1.1 200 OK"
+2026-03-17 16:39:52,413 - INFO - SUCCESS - Name: 新石器时代仰韶文化夹砂红陶缸
+2026-03-17 16:39:52,487 - INFO - HTTP Request: POST https://api.deepseek.com/chat/completions "HTTP/1.1 200 OK"
+2026-03-17 16:39:55,561 - INFO - SUCCESS - Name: 新石器时代人面纹彩陶杯
+2026-03-17 16:39:55,675 - INFO - HTTP Request: POST https://api.deepseek.com/chat/completions "HTTP/1.1 200 OK"
+2026-03-17 16:39:57,939 - INFO - SUCCESS - Name: 新石器时代马家窑文化半山类型四大圆圈纹双耳彩陶壶
+2026-03-17 16:39:58,084 - INFO - HTTP Request: POST https://api.deepseek.com/chat/completions "HTTP/1.1 200 OK"
+2026-03-17 16:40:00,377 - INFO - SUCCESS - Name: 新石器时代马家窑文化马厂类型菱纹双耳彩陶罐
