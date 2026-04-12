@@ -1,162 +1,141 @@
+import os
 import json
 import logging
-import time
+from datetime import datetime
 import pandas as pd
 from pathlib import Path
 from tqdm import tqdm
 from openai import OpenAI
+from dotenv import load_dotenv
 
-# ================= 配置区域 (Config) =================
-# 1. 填入你的 DeepSeek API Key
-API_KEY = "sk-611cba28f0d540d6a376882c866a6f2f" 
-
-# 2. 定义基础路径
-BASE_DIR = Path(__file__).parent.parent.parent.resolve() # wwsdw.net
+# ================= 1. 路径与配置设定 (Config) =================
+# 项目根目录与核心数据目录
+BASE_DIR = Path(__file__).parent.parent.parent.resolve()
 DATA_DIR = BASE_DIR / "data"
 OUTPUT_DIR = DATA_DIR / "extracted"
 LOG_DIR = BASE_DIR / "log"
+ENV_PATH = BASE_DIR / ".env"
 
-# 3. 文件路径
-INPUT_CSV = DATA_DIR / "sample_100_with_image_count.csv"
-PROMPT_FILE = DATA_DIR / "prompt.txt"
-OUTPUT_jsonl = OUTPUT_DIR / "extracted_metadata.jsonl" # 结果实时存这里
-LOG_FILE = LOG_DIR / "llm_process.log"
-
-# 4. 模型配置
-MODEL_NAME = "deepseek-chat"
-BASE_URL = "https://api.deepseek.com"
-
-# ================= 初始化环境 (Setup) =================
-# 强制健壮性：自动创建目录
+# 初始化基础目录
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 
-# 设置日志
+# 动态时间戳，避免覆盖历史文件
+TIMESTAMP = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+# 输入输出路径
+INPUT_CSV = DATA_DIR / "data_cleaned.csv"
+PROMPT_FILE = DATA_DIR / "prompt.txt"
+OUTPUT_JSONL = OUTPUT_DIR / f"extracted_metadata_{TIMESTAMP}.jsonl"
+LOG_FILE = LOG_DIR / f"llm_process_{TIMESTAMP}.log"
+
+# 模型配置
+MODEL_NAME = "deepseek-chat"
+
+# ================= 2. 环境初始化 (Setup) =================
+# 配置日志记录 (明确记录请求结果，便于溯源)
 logging.basicConfig(
     filename=LOG_FILE,
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     encoding='utf-8'
 )
-logger = logging.getLogger(__name__)
 
-# 初始化客户端
-client = OpenAI(api_key=API_KEY, base_url=BASE_URL)
+# 环境变量与客户端初始化
+load_dotenv(dotenv_path=ENV_PATH)
+API_KEY = os.getenv("DEEPSEEK_API_KEY")
+if not API_KEY:
+    raise ValueError(f"严重错误：未在 {ENV_PATH} 或环境中找到 DEEPSEEK_API_KEY。")
 
-def load_prompt_template():
-    """读取 prompt.txt 模板"""
-    assert PROMPT_FILE.exists(), f"❌ 找不到 Prompt 文件: {PROMPT_FILE}"
-    return PROMPT_FILE.read_text(encoding='utf-8')
+client = OpenAI(
+    api_key=API_KEY,
+    base_url=os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
+)
 
-def get_processed_ids():
-    """读取已完成的 ID，用于断点续传"""
+# ================= 3. 核心工具函数 =================
+def get_processed_ids(output_dir: Path) -> set:
+    """
+    扫描输出目录下所有的 jsonl 文件，提取已处理的 source_id。
+    完美兼容带时间戳的输出文件，实现跨文件的断点续传。
+    """
     processed = set()
-    if OUTPUT_jsonl.exists():
-        with open(OUTPUT_jsonl, 'r', encoding='utf-8') as f:
+    for file_path in output_dir.glob("*.jsonl"):
+        with open(file_path, 'r', encoding='utf-8') as f:
             for line in f:
                 try:
                     data = json.loads(line)
-                    # 假设 CSV 里有一列叫 'id' 或 'name' 作为唯一标识
-                    # 这里我们用 csv 的原始行号或 id 字段来去重
                     if 'source_id' in data:
-                        processed.add(data['source_id'])
-                except:
+                        processed.add(str(data['source_id']))
+                except json.JSONDecodeError:
                     continue
     return processed
 
-def call_deepseek(prompt_content):
-    """调用 DeepSeek API，带有简单的重试机制"""
+def extract_json(text: str) -> dict:
+    """提取大模型返回文本中的 JSON 内容"""
+    start = text.find('{')
+    end = text.rfind('}') + 1
+    if start == -1 or end == 0:
+        return {}
     try:
-        response = client.chat.completions.create(
-            model=MODEL_NAME,
-            messages=[
-                {"role": "system", "content": "You are a helpful assistant."},
-                {"role": "user", "content": prompt_content}
-            ],
-            temperature=0.1, # 降低随机性，保证格式稳定
-            stream=False
-        )
-        return response.choices[0].message.content
-    except Exception as e:
-        logger.error(f"API请求失败: {e}")
-        return None
+        return json.loads(text[start:end])
+    except json.JSONDecodeError:
+        return {}
 
-def clean_json_string(text):
-    """清洗大模型返回的文本，提取 JSON 部分"""
-    # 简单的清洗逻辑：找到第一个 { 和最后一个 }
-    try:
-        start = text.find('{')
-        end = text.rfind('}') + 1
-        if start == -1 or end == 0:
-            return None
-        json_str = text[start:end]
-        return json.loads(json_str)
-    except Exception as e:
-        logger.error(f"JSON解析失败: {e} \n原始文本: {text}")
-        return None
-
-# ================= 主逻辑 (Main) =================
+# ================= 4. 主流程 (Main) =================
 def main():
-    print("🚀 开始执行批处理任务...")
-    
-    # 1. 读取数据
-    assert INPUT_CSV.exists(), f"❌ 找不到 CSV 文件: {INPUT_CSV}"
+    if not INPUT_CSV.exists() or not PROMPT_FILE.exists():
+        raise FileNotFoundError(f"输入文件缺失，请检查：\n{INPUT_CSV}\n{PROMPT_FILE}")
+
+    prompt_template = PROMPT_FILE.read_text(encoding='utf-8')
     df = pd.read_csv(INPUT_CSV)
     
-    # 2. 读取 Prompt 模板
-    prompt_template = load_prompt_template()
+    # 鲁棒性处理：确保有可用的唯一 ID 列
+    if 'id' not in df.columns:
+        df['id'] = df.index 
+
+    # 收集历史进度，过滤待处理数据
+    processed_ids = get_processed_ids(OUTPUT_DIR)
+    df_to_process = df[~df['id'].astype(str).isin(processed_ids)]
     
-    # 3. 获取已处理列表 (断点续传核心)
-    processed_ids = get_processed_ids()
-    print(f"📦 检测到已处理 {len(processed_ids)} 条数据，将自动跳过...")
+    print(f"🚀 任务启动 | 总量: {len(df)} | 已完成: {len(processed_ids)} | 本次待处理: {len(df_to_process)}")
 
-    # 4. 准备待处理数据
-    # 假设 CSV 中有 'id' 列和 'name' 列
-    # 过滤掉已处理的
-    if 'id' in df.columns:
-        df_to_process = df[~df['id'].astype(str).isin(processed_ids)]
-    else:
-        # 如果没有 id 列，这里需要你根据实际情况修改，暂时全跑
-        df_to_process = df
-        print("⚠️ 警告：CSV中未找到 'id' 列，无法进行精确的断点续传去重。")
-
-    # 5. 循环处理 (使用 tqdm 进度条)
-    # 这里的 total 是剩余任务量
-    for index, row in tqdm(df_to_process.iterrows(), total=len(df_to_process), desc="Processing"):
-        
-        artifact_name = str(row['name']) # 确保转为字符串
-        source_id = str(row['id']) if 'id' in df.columns else str(index)
-        
-        # 替换模板变量
+    # 循环控制与进度追踪
+    for _, row in tqdm(df_to_process.iterrows(), total=len(df_to_process), desc="LLM Extraction"):
+        artifact_name = str(row['name'])
+        source_id = str(row['id'])
         current_prompt = prompt_template.replace("{input_name}", artifact_name)
         
-        # 调用 API
-        raw_response = call_deepseek(current_prompt)
-        
-        if raw_response:
-            structured_data = clean_json_string(raw_response)
-            
+        try:
+            # 发起网络请求
+            response = client.chat.completions.create(
+                model=MODEL_NAME,
+                messages=[
+                    {"role": "system", "content": "You are a helpful assistant."},
+                    {"role": "user", "content": current_prompt}
+                ],
+                temperature=0.1
+            )
+            raw_content = response.choices[0].message.content
+            structured_data = extract_json(raw_content)
+
             if structured_data:
-                # 注入原始 ID 方便后续合并
+                # 数据组装与落盘
                 structured_data['source_id'] = source_id
                 structured_data['original_name'] = artifact_name
                 
-                # 【关键】立即写入文件 (Append Mode)
-                with open(OUTPUT_jsonl, 'a', encoding='utf-8') as f:
+                with open(OUTPUT_JSONL, 'a', encoding='utf-8') as f:
                     f.write(json.dumps(structured_data, ensure_ascii=False) + "\n")
                 
-                logger.info(f"成功: {artifact_name}")
+                logging.info(f"[SUCCESS] {artifact_name} (ID: {source_id})")
             else:
-                logger.warning(f"解析失败: {artifact_name}")
-        else:
-            logger.error(f"请求无响应: {artifact_name}")
-            
-        # 避免并发过高（可选，DeepSeek 一般不需要 sleep，但在调试期加 0.1s 更稳）
-        time.sleep(0.1)
+                # 模型返回了非 JSON 格式
+                logging.warning(f"[PARSE_ERROR] {artifact_name} (ID: {source_id}) | 原始返回: {raw_content}")
 
-    print("\n✅ 任务完成！")
-    print(f"📁 结果已保存至: {OUTPUT_jsonl}")
-    print(f"📝 日志已保存至: {LOG_FILE}")
+        except Exception as e:
+            # 捕获网络、API Key 或限流等全部异常
+            logging.error(f"[REQUEST_FAILED] {artifact_name} (ID: {source_id}) | Error: {e}")
+
+    print(f"\n✅ 任务结束！\n📁 结果已存至: {OUTPUT_JSONL}\n📝 日志已存至: {LOG_FILE}")
 
 if __name__ == "__main__":
     main()

@@ -1,0 +1,173 @@
+import os
+import json
+import logging
+import time
+import pandas as pd
+from pathlib import Path
+from tqdm import tqdm
+from openai import OpenAI
+from dotenv import load_dotenv
+
+# ================= 配置区域 (Config) =================
+
+# 1. 定义基础路径
+BASE_DIR = Path(__file__).parent.parent.parent.resolve() # wwsdw.net
+DATA_DIR = BASE_DIR / "data"
+OUTPUT_DIR = DATA_DIR / "extracted"
+LOG_DIR = BASE_DIR / "log"
+ENV_PATH = BASE_DIR / ".env"
+
+# 2. 加载环境变量
+if ENV_PATH.exists():
+    load_dotenv(dotenv_path=ENV_PATH)
+    logging.info("成功加载 .env 配置文件")
+else:
+    # 强制报错，防止在没有 Key 的情况下运行浪费时间
+    raise FileNotFoundError(f"未在 {BASE_DIR} 找到 .env 文件，请先创建并配置 API Key")
+
+# 3. 文件路径
+INPUT_CSV = DATA_DIR / "sample_100_with_image_count.csv"
+PROMPT_FILE = DATA_DIR / "prompt.txt"
+OUTPUT_jsonl = OUTPUT_DIR / "extracted_metadata.jsonl" # 结果实时存这里
+LOG_FILE = LOG_DIR / "llm_process.log"
+
+# 4. 模型配置
+MODEL_NAME = "deepseek-chat"
+
+# ================= 初始化环境 (Setup) =================
+# 强制健壮性：自动创建目录
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+LOG_DIR.mkdir(parents=True, exist_ok=True)
+
+# 设置日志
+logging.basicConfig(
+    filename=LOG_FILE,
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    encoding='utf-8'
+)
+logger = logging.getLogger(__name__)
+
+# 初始化客户端
+client = OpenAI(
+    api_key=os.getenv("DEEPSEEK_API_KEY"),
+    base_url=os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
+)
+
+def load_prompt_template():
+    """读取 prompt.txt 模板"""
+    assert PROMPT_FILE.exists(), f"❌ 找不到 Prompt 文件: {PROMPT_FILE}"
+    return PROMPT_FILE.read_text(encoding='utf-8')
+
+def get_processed_ids():
+    """读取已完成的 ID，用于断点续传"""
+    processed = set()
+    if OUTPUT_jsonl.exists():
+        with open(OUTPUT_jsonl, 'r', encoding='utf-8') as f:
+            for line in f:
+                try:
+                    data = json.loads(line)
+                    # 假设 CSV 里有一列叫 'id' 或 'name' 作为唯一标识
+                    # 这里我们用 csv 的原始行号或 id 字段来去重
+                    if 'source_id' in data:
+                        processed.add(data['source_id'])
+                except:
+                    continue
+    return processed
+
+def call_deepseek(prompt_content):
+    """调用 DeepSeek API，带有简单的重试机制"""
+    try:
+        response = client.chat.completions.create(
+            model=MODEL_NAME,
+            messages=[
+                {"role": "system", "content": "You are a helpful assistant."},
+                {"role": "user", "content": prompt_content}
+            ],
+            temperature=0.1, # 降低随机性，保证格式稳定
+            stream=False
+        )
+        return response.choices[0].message.content
+    except Exception as e:
+        logger.error(f"API请求失败: {e}")
+        return None
+
+def clean_json_string(text):
+    """清洗大模型返回的文本，提取 JSON 部分"""
+    # 简单的清洗逻辑：找到第一个 { 和最后一个 }
+    try:
+        start = text.find('{')
+        end = text.rfind('}') + 1
+        if start == -1 or end == 0:
+            return None
+        json_str = text[start:end]
+        return json.loads(json_str)
+    except Exception as e:
+        logger.error(f"JSON解析失败: {e} \n原始文本: {text}")
+        return None
+
+# ================= 主逻辑 (Main) =================
+def main():
+    print("🚀 开始执行批处理任务...")
+    
+    # 1. 读取数据
+    assert INPUT_CSV.exists(), f"❌ 找不到 CSV 文件: {INPUT_CSV}"
+    df = pd.read_csv(INPUT_CSV)
+    
+    # 2. 读取 Prompt 模板
+    prompt_template = load_prompt_template()
+    
+    # 3. 获取已处理列表 (断点续传核心)
+    processed_ids = get_processed_ids()
+    print(f"📦 检测到已处理 {len(processed_ids)} 条数据，将自动跳过...")
+
+    # 4. 准备待处理数据
+    # 假设 CSV 中有 'id' 列和 'name' 列
+    # 过滤掉已处理的
+    if 'id' in df.columns:
+        df_to_process = df[~df['id'].astype(str).isin(processed_ids)]
+    else:
+        # 如果没有 id 列，这里需要你根据实际情况修改，暂时全跑
+        df_to_process = df
+        print("⚠️ 警告：CSV中未找到 'id' 列，无法进行精确的断点续传去重。")
+
+    # 5. 循环处理 (使用 tqdm 进度条)
+    # 这里的 total 是剩余任务量
+    for index, row in tqdm(df_to_process.iterrows(), total=len(df_to_process), desc="Processing"):
+        
+        artifact_name = str(row['name']) # 确保转为字符串
+        source_id = str(row['id']) if 'id' in df.columns else str(index)
+        
+        # 替换模板变量
+        current_prompt = prompt_template.replace("{input_name}", artifact_name)
+        
+        # 调用 API
+        raw_response = call_deepseek(current_prompt)
+        
+        if raw_response:
+            structured_data = clean_json_string(raw_response)
+            
+            if structured_data:
+                # 注入原始 ID 方便后续合并
+                structured_data['source_id'] = source_id
+                structured_data['original_name'] = artifact_name
+                
+                # 【关键】立即写入文件 (Append Mode)
+                with open(OUTPUT_jsonl, 'a', encoding='utf-8') as f:
+                    f.write(json.dumps(structured_data, ensure_ascii=False) + "\n")
+                
+                logger.info(f"成功: {artifact_name}")
+            else:
+                logger.warning(f"解析失败: {artifact_name}")
+        else:
+            logger.error(f"请求无响应: {artifact_name}")
+            
+        # 避免并发过高（可选，DeepSeek 一般不需要 sleep，但在调试期加 0.1s 更稳）
+        time.sleep(0.1)
+
+    print("\n✅ 任务完成！")
+    print(f"📁 结果已保存至: {OUTPUT_jsonl}")
+    print(f"📝 日志已保存至: {LOG_FILE}")
+
+if __name__ == "__main__":
+    main()
