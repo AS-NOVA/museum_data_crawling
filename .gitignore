@@ -3,3 +3,5 @@ log/
 model/
 old_images/
 .env
+highres_images/
+thumb_images/
